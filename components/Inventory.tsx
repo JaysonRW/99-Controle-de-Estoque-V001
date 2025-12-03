@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Product } from '../types';
-import { Plus, Edit2, Trash2, Search, AlertCircle, ArrowDown, ArrowUp } from 'lucide-react';
+import { Plus, Edit2, Trash2, Search, ArrowDown, ArrowUp, PackagePlus } from 'lucide-react';
 
 interface InventoryProps {
   products: Product[];
@@ -11,10 +11,11 @@ interface InventoryProps {
 
 export const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, onUpdateProduct, onDeleteProduct }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Form State
+  // Form State (CRUD)
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
   const [costPrice, setCostPrice] = useState('');
@@ -22,6 +23,11 @@ export const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, on
   const [currentStock, setCurrentStock] = useState('');
   const [minStock, setMinStock] = useState('');
 
+  // Form State (Restock)
+  const [restockQty, setRestockQty] = useState('');
+  const [restockCost, setRestockCost] = useState('');
+
+  // --- CRUD Logic ---
   const openAddModal = () => {
     setEditingProduct(null);
     setName('');
@@ -65,6 +71,42 @@ export const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, on
     setIsModalOpen(false);
   };
 
+  // --- Restock Logic ---
+  const openRestockModal = (p: Product) => {
+    setEditingProduct(p);
+    setRestockQty('');
+    setRestockCost(p.costPrice.toString()); // Default to current cost
+    setIsRestockModalOpen(true);
+  };
+
+  const handleRestockSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+
+    const qtyToAdd = parseInt(restockQty);
+    const newUnitCost = parseFloat(restockCost);
+    const currentQty = editingProduct.currentStock;
+    const currentUnitCost = editingProduct.costPrice;
+
+    // Weighted Average Cost Calculation
+    // ((OldQty * OldCost) + (NewQty * NewCost)) / TotalQty
+    const totalQty = currentQty + qtyToAdd;
+    let newAverageCost = currentUnitCost;
+    
+    if (totalQty > 0) {
+      newAverageCost = ((currentQty * currentUnitCost) + (qtyToAdd * newUnitCost)) / totalQty;
+    }
+
+    onUpdateProduct({
+      ...editingProduct,
+      currentStock: totalQty,
+      costPrice: parseFloat(newAverageCost.toFixed(2)), // Store rounded for simplicity
+      lastRestockDate: new Date().toISOString().split('T')[0]
+    });
+
+    setIsRestockModalOpen(false);
+  };
+
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     p.category.toLowerCase().includes(searchTerm.toLowerCase())
@@ -102,7 +144,7 @@ export const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, on
               <tr>
                 <th className="px-6 py-3">Produto</th>
                 <th className="px-6 py-3">Categoria</th>
-                <th className="px-6 py-3 text-right">Custo</th>
+                <th className="px-6 py-3 text-right">Custo Médio</th>
                 <th className="px-6 py-3 text-right">Venda (Sug.)</th>
                 <th className="px-6 py-3 text-center">Estoque</th>
                 <th className="px-6 py-3 text-center">Status</th>
@@ -112,7 +154,7 @@ export const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, on
             <tbody>
               {filteredProducts.map((product) => {
                 const isLowStock = product.currentStock <= product.minStock;
-                const minMarginPrice = product.costPrice * 1.2; // Example 20% margin rule
+                const minMarginPrice = product.costPrice * 1.2; 
                 
                 return (
                   <tr key={product.id} className="bg-white border-b hover:bg-slate-50 transition-colors">
@@ -143,10 +185,17 @@ export const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, on
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2">
-                        <button onClick={() => openEditModal(product)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition">
+                        <button 
+                          onClick={() => openRestockModal(product)} 
+                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
+                          title="Repor Estoque (Entrada)"
+                        >
+                          <PackagePlus className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => openEditModal(product)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition" title="Editar">
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button onClick={() => onDeleteProduct(product.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition">
+                        <button onClick={() => onDeleteProduct(product.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition" title="Excluir">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -166,7 +215,7 @@ export const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, on
         </div>
       </div>
 
-      {/* Modal */}
+      {/* Product Modal (Create/Edit) */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 animate-in zoom-in-95 duration-200">
@@ -201,12 +250,43 @@ export const Inventory: React.FC<InventoryProps> = ({ products, onAddProduct, on
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Estoque Mínimo (Alerta)</label>
                 <input required type="number" min="1" value={minStock} onChange={e => setMinStock(e.target.value)} className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none" />
-                <p className="text-xs text-slate-500 mt-1">Você será avisado quando o estoque atingir este valor.</p>
               </div>
 
               <div className="flex justify-end gap-3 mt-6">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
                 <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md">Salvar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Restock Modal */}
+      {isRestockModalOpen && editingProduct && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-6 animate-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-bold text-slate-900 mb-2 flex items-center gap-2">
+              <PackagePlus className="w-5 h-5 text-emerald-600" />
+              Repor Estoque
+            </h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Adicionando itens ao produto: <strong>{editingProduct.name}</strong>
+            </p>
+            
+            <form onSubmit={handleRestockSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Quantidade a Adicionar</label>
+                <input required type="number" min="1" value={restockQty} onChange={e => setRestockQty(e.target.value)} className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-emerald-500 outline-none" autoFocus />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Custo Unitário (desta remessa)</label>
+                <input required type="number" step="0.01" min="0" value={restockCost} onChange={e => setRestockCost(e.target.value)} className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-emerald-500 outline-none" />
+                <p className="text-xs text-slate-500 mt-1">O preço de custo médio do produto será recalculado automaticamente.</p>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button type="button" onClick={() => setIsRestockModalOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+                <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 shadow-md">Confirmar Entrada</button>
               </div>
             </form>
           </div>
